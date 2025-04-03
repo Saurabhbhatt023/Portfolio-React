@@ -1,40 +1,89 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const User = require("./models/user");
+const cookieParser = require("cookie-parser");
+const cors = require("cors");
+const { scheduleEmailJob } = require("./utils/cronjob");
+require("dotenv").config();
 
 const app = express();
-app.use(express.json()); // To parse incoming JSON data
 
-const connectDb = async () => {
-  await mongoose.connect(
-    "mongodb+srv://saurabhbhatt1211:8aMeDjuWoXHJl1kS@cluster023.k38ng.mongodb.net/Devtinder?tls=true"
-  );
-};
+// FIXED: CORS Configuration for cross-origin cookie handling
+const allowedOrigins = [
+  "http://localhost:5173", // Vite local dev
+  "http://localhost:3000", // React local dev (alternative port)
+  "https://www.vibenweb.xyz", // Production frontend (Netlify)
+  "https://vibenweb.xyz", // Non-www version of production frontend
+];
 
-app.post("/signup", async (req, res) => {
-  try {
-    const user = new User({
-      firstName: "Viarat",
-      lastName: "kohli",
-      emailId: "Saurabhdd122@gmail.com",
-      password: "Saurabh@123",
-    });
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.log("Blocked by CORS:", origin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true, // Critical for cookies
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+    exposedHeaders: ["Set-Cookie"], // Important for cookie visibility
+    maxAge: 86400,
+  })
+);
 
-    await user.save();
-    console.log("User saved:", user);
-    res.send("User Added Successfully");
-  } catch (error) {
-    res.status(500).send("Error adding user: " + error.message);
-  }
+// Middleware
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Routes
+const authRouter = require("./routes/auth");
+const profileRouter = require("./routes/profile");
+const requestRouter = require("./routes/request");
+const userRouter = require("./routes/user");
+
+// Prefix all API routes with `/api`
+app.use("/api", authRouter);
+app.use("/api", profileRouter);
+app.use("/api", requestRouter);
+app.use("/api", userRouter);
+
+// Health Check Endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ 
+    status: "ok", 
+    message: "Server is running",
+    cors: {
+      allowedOrigins,
+      credentials: true
+    }
+  });
 });
 
-connectDb()
-  .then(() => {
-    console.log("Database is established");
-    app.listen(7777, () => {
-      console.log(`Server is running on http://localhost:7777`);
+// Database Connection
+const connectDb = async () => {
+  try {
+    await mongoose.connect(process.env.DB_CONNECTION_SECRET, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
     });
-  })
-  .catch((err) => {
-    console.log("Database cannot be connected", err);
+    console.log("✅ Database connected successfully");
+
+    // Schedule email job (if used in your app)
+    scheduleEmailJob(4);
+  } catch (err) {
+    console.error("❌ Database connection failed:", err);
+  }
+};
+
+// Start Server
+connectDb().then(() => {
+  const PORT = process.env.PORT || 7777;
+  app.listen(PORT, () => {
+    console.log(`✅ Server is running on http://localhost:${PORT}`);
   });
+});
+
+module.exports = app;
